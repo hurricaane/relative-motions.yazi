@@ -126,16 +126,16 @@ local render_numbers = ya.sync(function(_, mode)
 			end
 		end
 
-		local num_format = "%" .. #tostring(total) .. "d"
-
-		-- emulate vim's hovered offset
+		-- emulate vim's hovered offset: the hovered number is left-aligned
+		local width = #tostring(total)
 		if hovered == index then
-			return ui.Span(string.format(num_format .. " ", idx))
+			return string.format("%-" .. width .. "d", idx)
 		else
-			return ui.Span(string.format(" " .. num_format, idx))
+			return string.format("%" .. width .. "d", idx)
 		end
 	end
 
+	-- Based on Yazi's preset Current:redraw() (truncation, drag and drop), with the numbers prepended
 	Current.redraw = function(self)
 		local files = self._folder.window
 		if #files == 0 then
@@ -150,18 +150,36 @@ local render_numbers = ya.sync(function(_, mode)
 			end
 		end
 
-		local entities, linemodes = {}, {}
+		local left, right = {}, {}
 		for i, f in ipairs(files) do
-			linemodes[#linemodes + 1] = Linemode:new(f):redraw()
-
 			local entity = Entity:new(f)
-			entities[#entities + 1] = ui.Line({ Entity:number(i, #self._folder.files, f, hovered_index), entity:redraw() })
-				:style(entity:style())
+			local number = Entity:number(i, #self._folder.files, f, hovered_index)
+
+			-- One uniform highlight on the hovered line: the rounded cap Entity:padding() normally
+			-- draws before the icon moves before the number, and the padding becomes a plain space.
+			-- Other numbers keep no background.
+			local head
+			local rev = f.is_hovered and entity:style_rev()
+			if rev then
+				entity.padding = function() return " " end
+				head = ui.Line { ui.Span(th.indicator.padding.open):style(rev), ui.Span(number):style(entity:style()) }
+			else
+				head = ui.Line { " ", number }
+			end
+
+			-- Measured before ui.Line {} below takes ownership of `head`
+			local head_width = head:width()
+			right[#right + 1] = Linemode:new(f):redraw()
+			left[#left + 1] = ui.Line({ head, entity:redraw() }):style(entity:style())
+
+			local max = math.max(0, self._area.w - right[#right]:width())
+			left[#left]:truncate { max = max, ellipsis = entity:ellipsis(max - head_width) }
 		end
 
 		return {
-			ui.List(entities):area(self._area),
-			ui.Text(linemodes):area(self._area):align(ui.Align.RIGHT),
+			ui.List(left):area(self._area),
+			ui.Text(right):area(self._area):align(ui.Align.RIGHT),
+			table.unpack(Dnd:new(self._area):redraw()),
 		}
 	end
 end)
